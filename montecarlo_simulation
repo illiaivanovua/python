@@ -1,0 +1,251 @@
+# My monte-carlo simulation model is running 100k predictions for any stock from yahoo finance. 
+# Copy code directly to Jypiter Notebook or Spyder to run model.
+# code divided by empty cells is blocks "In []:"
+# change ticker in 2nd block to change the stock you need.
+# t_intervals in 8th block is represent 250 trading days or 1 calendar year. Change this variable if you want to change prediction h-zn.
+
+
+import numpy as np
+import pandas as pd
+from pandas_datareader import data as wb
+import matplotlib.pyplot as plt
+from scipy.stats import norm
+%matplotlib inline
+from datetime import datetime
+
+ticker = 'AAPL'
+data = pd.DataFrame()
+data[ticker] = wb.DataReader(ticker, data_source='yahoo', start='2015-1-1') ['Adj Close']
+print(data.head(1))
+print(data.tail(1))
+
+log_returns = np.log(1 + data.pct_change())
+u = log_returns.mean()
+var = log_returns.var()
+drift = u - (0.5 * var)
+
+stdev = log_returns.std()
+print('Returns standart deviaton = ', float(stdev))
+
+drift.values
+stdev.values
+
+h = norm.ppf(0.95)
+x = np.random.rand(10,2)
+b = norm.ppf(x)
+z = norm.ppf(np.random.rand(10,2))
+
+import yfinance as yf
+stock= yf.Ticker(ticker)
+a = stock.info
+currency = a.get('currency')
+name = a.get('longName')
+
+t_intervals = 250
+iterations = 100000
+
+daily_returns = np.exp(drift.values + stdev.values * norm.ppf(np.random.rand(t_intervals, iterations)))
+
+price_list = np.zeros_like(daily_returns)
+
+S0 = data.iloc[-1]
+price_list[0] = S0
+
+for t in range(1, t_intervals):
+    price_list[t] = price_list[t-1] * daily_returns[t]
+
+prices = pd.DataFrame(price_list)
+prices
+
+prices_array = np.array(prices.tail(1))
+prices_array_1d = np.concatenate(prices_array)
+
+prices_list = prices_array_1d.tolist()
+print ('Forecasted prices st deviation = ', int(prices_array.std()))
+print ('Forecasted prices mean = ', int(prices_array.mean()))
+
+print('Max forecasted price =', int(prices_array.max()))
+print('Min forecasted price = ', int(prices_array.min()))
+s1 = float(S0)
+
+range_len = (prices_array.max() - prices_array.min()) / 400 # divided by 400 because of count of bins in histogram
+range_len
+
+df = prices.tail(1)
+
+ranges = np.arange(df.T.min()[249]-5,df.T.max()[249]+5,range_len)
+df_count = df.T.groupby(pd.cut(df.T[249], ranges)).count()
+df_count.to_excel('ranges.xlsx')
+colnames=['num', 'ranges', 'itr'] 
+new_df = pd.read_excel(r'ranges.xlsx', names=colnames, header=None)
+new_df_sort = new_df.sort_values(by=['ranges'])
+top_intervals = new_df_sort.tail(40)
+new_intervals = top_intervals.sort_values(by=['num'])
+intervals = pd.DataFrame(new_intervals['num'])
+
+intervals['num'] = intervals['num'].astype('str')
+#
+intervals['first_num'] = None
+intervals['second_num'] = None
+
+intervals.reset_index(drop=True, inplace=True)
+
+# borders of range contains 50% of forecasts
+for i in range(len(intervals)):
+    intervals.loc[i, 'first_num'] = ''.join(list(intervals.loc[i, 'num'].split(',')[0])[1:])
+    intervals.loc[i, 'second_num'] = ''.join(list(intervals.loc[i, 'num'].split(',')[1])[:-1])
+    
+df_sort_itr = new_df.sort_values(by=['ranges'], ascending = False)
+#
+df_sort_itr['num'] = df_sort_itr['num'].astype('str')
+#
+df_sort_itr['first_num'] = None
+df_sort_itr['second_num'] = None
+
+df_sort_itr.reset_index(drop=True, inplace=True)
+
+for i in range(len(intervals)):
+    df_sort_itr.loc[i, 'first_num'] = ''.join(list(df_sort_itr.loc[i, 'num'].split(',')[0])[1:])
+    df_sort_itr.loc[i, 'second_num'] = ''.join(list(df_sort_itr.loc[i, 'num'].split(',')[1])[:-1])
+    
+# range which contains most count of forecasts
+min_inrange = float(df_sort_itr.iloc[0]['first_num'])
+max_inrange = float(df_sort_itr.iloc[0]['second_num'])
+nonfloat_min_inrange = df_sort_itr.iloc[0]['first_num']
+median = (max_inrange + min_inrange) / 2
+print('Price with most forecasts = ', median)
+
+new_df['num'] = new_df['num'].astype('str')
+#
+new_df['first_num'] = None
+new_df['second_num'] = None
+#
+new_df.reset_index(drop=True, inplace=True)
+new_df.drop([0], inplace = True)
+new_df.reset_index(drop=True, inplace=True)
+
+for i in range(len(new_df)):
+    new_df.loc[i, 'first_num'] = ''.join(list(new_df.loc[i, 'num'].split(',')[0])[1:])
+    new_df.loc[i, 'second_num'] = ''.join(list(new_df.loc[i, 'num'].split(',')[1])[:-1])
+    
+median_range = iterations/2
+max_error = int(median_range * 0.02)
+#
+new_df_sum = new_df[['num', 'ranges', 'first_num','second_num']].copy() #creating df with cumulative sum of forecasts
+new_df_sum.drop([0], inplace = True)
+new_df_sum['cumsum'] = new_df_sum['ranges'].cumsum()
+new_df_sum.reset_index(drop=True, inplace=True)
+#
+for i in range(len(new_df_sum)): #extracting prices from price range
+    new_df_sum.loc[i, 'first_num'] = ''.join(list(new_df_sum.loc[i, 'num'].split(',')[0])[1:])
+    new_df_sum.loc[i, 'second_num'] = ''.join(list(new_df_sum.loc[i, 'num'].split(',')[1])[:-1])
+#
+center = new_df_sum.loc[new_df_sum['first_num'] == nonfloat_min_inrange] #finging range with most forecasts
+center.reset_index(drop=True, inplace=True)
+cumsum_halfrange = center.iloc[0]['cumsum']
+#
+l_b = cumsum_halfrange - (iterations * 0.25) #finding cumsums for "range with most forecasts" +/-25%, so we can 
+r_b = cumsum_halfrange + (iterations * 0.25) #highlight the area contains a 50% of all forecasts
+
+ranges_left_border = new_df_sum.where((new_df_sum['cumsum']>=l_b - max_error)&(new_df_sum['cumsum']<=l_b + max_error)).dropna()
+ranges_left_border.reset_index(drop=True, inplace=True)
+l_b_num = ranges_left_border.iloc[0]['first_num']
+left_border = float(l_b_num) #find the price which represent a left border for 50% range
+#
+ranges_right_border = new_df_sum.where((new_df_sum['cumsum']>=r_b - max_error)&(new_df_sum['cumsum']<=r_b + max_error)).dropna()
+ranges_right_border.reset_index(drop=True, inplace=True)
+r_b_num = ranges_right_border.iloc[0]['second_num']
+right_border = float(r_b_num) #find the price which represent a right border for 50% range
+
+my_cols = df.T[df.T[249].between(min_inrange, max_inrange)].index
+
+new_df['num'] = new_df['num'].astype('str')
+#
+new_df['first_num'] = None
+new_df['second_num'] = None
+
+# finding a % of forecasts outside the 50% interval borders
+new_df_2 = new_df[['num', 'ranges', 'first_num','second_num']].copy()
+new_df_2.reset_index(drop=True, inplace=True)
+new_df_2['num'] = new_df_2['num'].astype('str')
+new_df_2.drop([0], inplace = True)
+new_df_2.reset_index(drop=True, inplace=True)
+
+for i in range(len(new_df_2)):
+    new_df_2.loc[i, 'first_num'] = ''.join(list(new_df_2.loc[i, 'num'].split(',')[0])[1:])
+    new_df_2.loc[i, 'second_num'] = ''.join(list(new_df_2.loc[i, 'num'].split(',')[1])[:-1])
+#
+first = new_df_2.loc[0]['first_num']
+last = new_df_2.iloc[-1]['second_num']
+
+#finding a % of forecasts from right border to highest forecasted price
+new_df_4 =  new_df_2[['num', 'ranges', 'first_num','second_num']].copy()
+new_df_4.set_index('second_num', inplace = True)
+right_side = new_df_4.loc[r_b_num : last]
+right_itr = right_side['ranges'].sum()
+right_percentile = right_itr / iterations
+
+a = float(S0) # finding probability increasing/decreasing of current stock price
+#
+new_df_sum["first_num"] = pd.to_numeric(new_df_sum["first_num"])
+current_price_df = new_df_sum.loc[(new_df_sum['first_num'] >= a) & (new_df_sum['first_num'] <= a*1.05)]
+
+most_prices = prices[my_cols]
+
+date = data.tail(1)
+date = date.reset_index().set_index(ticker)
+date.reset_index(drop=True, inplace=True)
+date2 = date.loc[0]
+date3 = date2.dt.strftime('%d-%m-%Y')
+date4 = date3.tolist()
+last_date = date4[0]
+
+line_length = len(my_cols)
+title = 'Forecasting ' + name + ' company`s stock price for 1Y horizon'
+c_p = 'Current price = ' + str("%.2f" % round(S0,2)) + ' ' + currency
+c_p_d = c_p + ', date: ' + last_date
+
+#finding percentiles for plotting on graph
+#
+left_percentile_in_percent ='prob. '+'{:.1%}'.format(left_percentile)
+right_percentile_in_percent ='prob. '+ '{:.1%}'.format(right_percentile)
+median_percentile = 1 - left_percentile - right_percentile
+median_percentile_in_percent = 'prob. '+'{:.1%}'.format(median_percentile)
+#
+prob_decrease = current_price_df.head(1)['cumsum'] / iterations
+prob_increase = 1 - prob_decrease
+
+plt.figure(figsize=(12,6))
+#
+n, bins, patches = plt.hist(prices.tail(1), bins=400, facecolor='#ff246d', edgecolor='#e0e0e0', linewidth=0.3, alpha=0.7)
+n = n.astype('int')
+for i in range(len(patches)):
+    patches[i].set_facecolor(plt.cm.plasma(n[i]/max(n)))
+plt.axvspan(left_border, right_border, color='lightgoldenrodyellow', zorder=0)
+#
+plt.title(title)
+plt.ylabel('Number of forecasts')
+plt.xlabel('Price')
+plt.xlim(right=(prices_array.mean() + 2.5 * prices_array.std()))
+#
+plt.text(median - median * 0.05, line_length * 0.6, median_percentile_in_percent, fontsize=12, bbox=dict(facecolor='white', alpha=1))
+plt.text(median - median * 0.6, line_length * 0.4, left_percentile_in_percent, fontsize=12, bbox=dict(facecolor='white', alpha=1))
+plt.text(median + median * 0.4, line_length * 0.4, right_percentile_in_percent, fontsize=12, bbox=dict(facecolor='white', alpha=1))
+#
+text_decrease = '\n'.join((
+    r'prob.decrease',
+    r'       '+ '{:.1%}'.format(float(prob_decrease)) + ' <--'))
+plt.text(S0*0.75, line_length * 0.85, text_decrease, fontsize = 12, bbox=dict(facecolor='white', alpha=1))
+#
+text_increase = '\n'.join((
+    r'prob.increase',
+    r'--> ' +'{:.1%}'.format(float(prob_increase))))
+plt.text(S0*1.02, line_length * 0.8, text_increase, fontsize = 12, bbox=dict(facecolor='white', alpha=1))
+#
+x1 = [S0,S0] 
+y1 = [0, line_length]
+plt.plot(x1, y1, label=c_p_d, color = 'blue')
+#
+plt.legend(fontsize = 10)
+plt.savefig('stock monte-carlo.jpg')
+plt.show()
